@@ -92,8 +92,45 @@ def _entry(player, score, prob, disponible, tag):
     }
 
 
+def _fill(need, avail, gk, pool):
+    """Fill a formation, position by position, NEVER leaving a slot empty.
+
+    First takes the best AVAILABLE players of each position. If a position is short
+    (injury crisis), it backfills the missing slots from `pool` — the global bench,
+    ordered available-first — so we never send an unavailable/empty slot. Returns
+    (picks, unavailable_in_xi) or None if the squad can't fill 11 at all.
+    """
+    used = {gk["playerTeamId"]}
+    picks = {}
+    for pos, n in need.items():
+        take = [e for e in avail[pos] if e["playerTeamId"] not in used][:n]
+        for e in take:
+            used.add(e["playerTeamId"])
+        picks[pos] = take
+    # backfill shortfalls from the global bench (available players first)
+    bench = [e for e in pool if e["playerTeamId"] not in used]
+    bi = 0
+    for pos, n in need.items():
+        while len(picks[pos]) < n and bi < len(bench):
+            e = bench[bi]
+            bi += 1
+            picks[pos].append(e)
+            used.add(e["playerTeamId"])
+    if any(len(picks[pos]) < n for pos, n in need.items()):
+        return None  # not even 11 players in the squad
+    unavailable = sum(1 for pos in picks for e in picks[pos] if not e["disponible"])
+    return picks, unavailable
+
+
 def optimize(team, prob_index=None):
-    """Computes the best XI + formation. Returns a dict with the proposal and the body."""
+    """Computes the best XI + formation. Returns a dict with the proposal and the body.
+
+    Guarantees a COMPLETE XI: every slot of the chosen formation is filled, and no
+    unavailable (injured/suspended) player is fielded as long as the squad has enough
+    available players to field 11 — backfilling from the available bench if a position
+    runs short. LaLiga silently drops an unavailable player, so fielding one leaves the
+    slot empty; this never does that when it can be avoided.
+    """
     if prob_index is None:
         prob_index = probable_lineups()
 
@@ -114,30 +151,42 @@ def optimize(team, prob_index=None):
 
     if not by_pos["goalkeeper"]:
         raise ValueError("No goalkeeper in the squad.")
-    gk = by_pos["goalkeeper"][0]
+    # only AVAILABLE players are candidates for a slot; injured/suspended never fielded
+    avail = {pos: [e for e in by_pos[pos] if e["disponible"]] for pos in by_pos}
+    gk = (avail["goalkeeper"] or by_pos["goalkeeper"])[0]
+
+    # global bench for backfilling short positions: available players first (by score),
+    # unavailable players only as an absolute last resort (so a slot is never empty).
+    ordered = [e for pos in by_pos for e in by_pos[pos]]
+    pool = sorted(ordered, key=lambda e: (not e["disponible"], -e["score"]))
 
     best = None
     for d, m, f in FORMATIONS:
-        if len(by_pos["defender"]) < d or len(by_pos["midfield"]) < m \
-                or len(by_pos["striker"]) < f:
-            continue  # not enough players for this formation
-        defs = by_pos["defender"][:d]
-        mids = by_pos["midfield"][:m]
-        strs = by_pos["striker"][:f]
-        total = gk["score"] + sum(e["score"] for e in defs + mids + strs)
+        need = {"defender": d, "midfield": m, "striker": f}
+        # prefer formations we can fill entirely from AVAILABLE players of each position
+        full_available = (len(avail["defender"]) >= d and len(avail["midfield"]) >= m
+                          and len(avail["striker"]) >= f)
+        filled = _fill(need, avail, gk, pool)
+        if filled is None:
+            continue  # can't field 11 in this shape
+        picks, unavailable = filled
+        total = gk["score"] + sum(e["score"] for pos in picks for e in picks[pos])
         cand = {
             "formation": (d, m, f),
             "goalkeeper": gk,
-            "defender": defs,
-            "midfield": mids,
-            "striker": strs,
+            "defender": picks["defender"],
+            "midfield": picks["midfield"],
+            "striker": picks["striker"],
             "total": round(total, 1),
+            # rank: fewest injured fielded, then prefer a clean shape, then score
+            "_rank": (-unavailable, 1 if full_available else 0, round(total, 1)),
         }
-        if best is None or cand["total"] > best["total"]:
+        if best is None or cand["_rank"] > best["_rank"]:
             best = cand
 
     if best is None:
         raise ValueError("Not enough players for any valid formation.")
+    best.pop("_rank", None)
 
     best["payload"] = {
         "goalkeeper": best["goalkeeper"]["playerTeamId"],
