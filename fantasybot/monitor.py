@@ -107,6 +107,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             global _RUNNING
             try:
                 if mode == "hermes":
+                    if not shutil.which("hermes"):
+                        print("[watch] Hermes no está instalado. Instala Hermes Agent "
+                              "(https://hermes-agent.nousresearch.com) o usa "
+                              "'fantasybot watch --run' para el agente determinista "
+                              "(sin Hermes).", file=sys.stderr, flush=True)
+                        return
                     subprocess.run(["hermes", "-z", HERMES_PROMPT,
                                     "--skill", "fantasy-manager"])
                 else:
