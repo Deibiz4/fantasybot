@@ -1,0 +1,32 @@
+[project]
+name = "fantasybot"
+version = "0.1.0"
+description = "Autonomous agent for LALIGA Fantasy (toolbox + strategies)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Jon Ortega" }]
+keywords = ["laliga", "fantasy", "football", "agent", "automation", "cli"]
+dependencies = []  # standard library only
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Environment :: Console",
+  "Topic :: Games/Entertainment",
+]
+
+[project.urls]
+Homepage = "https://github.com/jonortega20/fantasybot"
+Repository = "https://github.com/jonortega20/fantasybot"
+
+[project.scripts]
+fantasybot = "fantasybot.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["fantasybot*"]
+
+[tool.setuptools.package-data]
+fantasybot = ["web/*.html"]  # the monitoring UI panel ships with the package
