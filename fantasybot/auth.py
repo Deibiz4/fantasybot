@@ -107,10 +107,15 @@ def _post_token(body: dict) -> dict:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")
-        # A dead/rotated/expired refresh token (or a stale auth code) comes back as
-        # invalid_grant / AADB2C90090 ("not a valid 5 segment token"). Surface the human
-        # action, not the raw B2C blob.
+        # invalid_grant / AADB2C90090 ("not a valid 5 segment token"): the grant we sent
+        # was rejected. Give a message that fits WHICH grant it was.
         if e.code == 400 and ("invalid_grant" in detail or "AADB2C90090" in detail):
+            if body.get("grant_type") == "authorization_code":
+                raise AuthError(
+                    "The login code was rejected. It's single-use and expires within a "
+                    "couple of minutes — run `fantasybot login` again and paste the "
+                    "redirect URL right away. Don't reuse an old code, and don't re-run "
+                    "step 1 in between (that regenerates the PKCE verifier).")
             raise AuthError("Your LaLiga session has expired or is no longer valid. "
                             "Run `fantasybot login` again to reconnect your account.")
         raise AuthError(f"{e.code}: {detail}")
