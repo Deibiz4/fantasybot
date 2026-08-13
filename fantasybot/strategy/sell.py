@@ -17,9 +17,14 @@ FALLING_THRESHOLD = -20  # trend (from futbolfantasy) below which it's "falling"
 
 
 def sell_candidates(team, best, trends_index, falling_threshold=FALLING_THRESHOLD):
-    """Players recommended to sell, with reason, priority and suggested price."""
-    xi_ids = payload_ids(best)
-    watch_ids = {w["playerTeamId"] for w in best.get("watch", [])}
+    """Players recommended to sell, with reason, priority and suggested price.
+
+    `best` may be None when the squad can't field a valid XI yet (e.g. no goalkeeper).
+    A missing lineup shouldn't silence the sell advice — there are simply no protected
+    starters, so we fall back to flagging clearly-falling-value players.
+    """
+    xi_ids = payload_ids(best) if best else set()
+    watch_ids = {w["playerTeamId"] for w in best.get("watch", [])} if best else set()
 
     out = []
     for p in team["players"]:

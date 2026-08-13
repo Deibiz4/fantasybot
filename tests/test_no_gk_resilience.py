@@ -88,8 +88,26 @@ class ReviewResilience(unittest.TestCase):
         self.assertIsNone(rep["lineup"]["formation"])
         self.assertIn("note", rep["lineup"])
         self.assertFalse(rep["lineup"]["changed"])
-        self.assertEqual(rep["sells"], [])          # nothing to sell without an XI
+        # a missing lineup only skips the lineup — the rest still runs, not crashes
+        self.assertIsInstance(rep["sells"], list)
         self.assertIn("POR", rep["gaps"])            # the GK gap IS surfaced
+
+
+class SellWithoutLineup(unittest.TestCase):
+    """A missing lineup (best=None) must not silence sell advice: falling-value players
+    are still flagged (there are just no protected starters)."""
+
+    def test_falling_player_flagged_when_best_is_none(self):
+        from fantasybot.strategy import sell
+        team = {"teamMoney": 0, "players": [
+            {"playerTeamId": "pt1", "playerMaster": {
+                "id": "p1", "nickname": "Falling", "name": "Falling",
+                "positionId": 4, "marketValue": 5_000_000}}]}
+        trends = {"falling": {"tendencia": -40}}
+        with mock.patch.object(sell, "match_name", lambda n, nm, i: trends["falling"]):
+            out = sell.sell_candidates(team, None, trends)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["nombre"], "Falling")
 
     def test_full_squad_review_still_produces_a_lineup(self):
         rep = agent_mod.review(_FakeClient(_squad(with_gk=True)))

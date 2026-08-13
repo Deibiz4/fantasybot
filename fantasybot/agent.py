@@ -144,9 +144,9 @@ def review(client, days_to_matchday=None):
              if o["margin_pct"] > 0 and o["buy_price"] <= team["teamMoney"]][:5]
     gaps = needs_mod.gaps(team)
     needs_report = needs_mod.advise(client, lid, team, days_to_matchday)
-    # sells rank against the optimal XI; without one (incomplete squad) there's nothing
-    # to recommend selling yet.
-    sells = sell_mod.sell_candidates(team, best, trends_index()) if best else []
+    # A missing lineup (incomplete squad) only skips the lineup itself — sells, flips,
+    # clauses and reminders still apply. sell_candidates handles best=None.
+    sells = sell_mod.sell_candidates(team, best, trends_index())
 
     # 4) buyout targets + reminders
     targets = clause_targets(market, team, prob_index)
