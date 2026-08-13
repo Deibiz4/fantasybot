@@ -23,9 +23,12 @@
     --sh-btn:0 1px 2px rgba(40,46,110,.28),0 1px 1px rgba(0,0,0,.04);
   }
   *{box-sizing:border-box}
-  html,body{margin:0;height:100%}
+  html,body{margin:0}
+  /* min-height (not height:100%) so the page GROWS with the feed and the window scrolls;
+     a fixed height:100% trapped the body at viewport height and .app's overflow:hidden
+     then clipped every card past the first screenful. */
   body{background:var(--page); color:var(--ink); font:14.5px/1.55 var(--sans);
-    -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; min-height:100%;
+    -webkit-font-smoothing:antialiased; display:flex; flex-direction:column; min-height:100vh;
     padding:26px 16px 40px}
   .app{width:100%; max-width:800px; margin:0 auto; background:var(--surface);
     border:1px solid var(--line); border-radius:16px; overflow:hidden; box-shadow:var(--sh-md)}

@@ -5,6 +5,7 @@ exposes read and write methods. The rest of the project builds on this.
 """
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -86,10 +87,23 @@ class FantasyClient:
         return self.get(self._cmp("/leagues?x-lang=es"))
 
     def default_ids(self):
-        """(league_id, team_id) of the user's first league."""
+        """(league_id, team_id) of the league to operate on.
+
+        Defaults to the user's first league, so single-league setups (the OSS self-host
+        case) work with no config. Set FANTASYBOT_LEAGUE=<id> to pin a specific league —
+        that's how the hosted service drives an account that has several leagues: it runs
+        the agent once per league, exporting this var each time. Every command resolves
+        ids through here, so one env var steers them all without touching call sites.
+        """
         leagues = self.leagues()
         if not leagues:
             raise FantasyError("The user has no leagues.")
+        want = os.environ.get("FANTASYBOT_LEAGUE")
+        if want:
+            for lg in leagues:
+                if str(lg["id"]) == str(want):
+                    return lg["id"], str(lg["team"]["id"])
+            raise FantasyError(f"League {want} is not in this account.")
         lg = leagues[0]
         return lg["id"], str(lg["team"]["id"])
 
