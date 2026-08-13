@@ -67,10 +67,16 @@ def evaluate(element, index, horizon):
     }
 
 
-def opportunities(client, league_id, horizon=DEFAULT_HORIZON):
-    """List of flip opportunities sorted by margin %, highest to lowest."""
+def opportunities(client, league_id, horizon=DEFAULT_HORIZON, owned=None):
+    """List of flip opportunities sorted by margin %, highest to lowest.
+
+    `owned` is the set of playerMaster ids already in the squad; they're excluded, so
+    the agent never suggests "signing" a player you already own (e.g. one you've listed
+    on the market, which otherwise shows up as a buyout/system target).
+    """
     index = trends_index()
+    owned = owned or set()
     ops = [evaluate(el, index, horizon) for el in client.market(league_id)]
-    ops = [o for o in ops if o]
+    ops = [o for o in ops if o and o["player_id"] not in owned]
     ops.sort(key=lambda r: -r["margin_pct"])
     return ops

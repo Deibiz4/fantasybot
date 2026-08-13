@@ -139,7 +139,8 @@ def review(client, days_to_matchday=None):
                           "watch": [], "note": str(e)}
 
     # 3) flips, needs and sales
-    flips = [o for o in flip.opportunities(client, lid)
+    owned = {p["playerMaster"]["id"] for p in team["players"]}
+    flips = [o for o in flip.opportunities(client, lid, owned=owned)
              if o["margin_pct"] > 0 and o["buy_price"] <= team["teamMoney"]][:5]
     gaps = needs_mod.gaps(team)
     needs_report = needs_mod.advise(client, lid, team, days_to_matchday)

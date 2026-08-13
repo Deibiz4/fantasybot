@@ -28,6 +28,7 @@ import time
 from . import events
 
 _RUNNING = False   # prevents launching two cycles at once from the button
+_RUN_LOCK = threading.Lock()   # makes the check-and-set atomic (no double-fire)
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 DASHBOARD = os.path.join(WEB_DIR, "dashboard.html")
@@ -48,7 +49,8 @@ def _insights():
         return {"available": False}
     try:
         out = subprocess.run(["hermes", "insights", "--days", "1"],
-                             capture_output=True, text=True, timeout=20).stdout
+                             capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=20).stdout
     except (OSError, subprocess.SubprocessError):
         return {"available": False}
 
@@ -99,8 +101,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _run(self):
         """Launches the real agent cycle (the 'Launch agent' button)."""
         global _RUNNING
-        if _RUNNING:
-            return self._send(409, "application/json", b'{"error":"already running"}')
+        # Atomic check-and-set: two quick clicks (concurrent POSTs) must not both pass
+        # the guard and launch two cycles (in hermes mode that burns real LLM tokens).
+        with _RUN_LOCK:
+            if _RUNNING:
+                return self._send(409, "application/json", b'{"error":"already running"}')
+            _RUNNING = True
         mode = getattr(self.server, "run_mode", "agent")
 
         def go():
@@ -118,9 +124,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 else:
                     subprocess.run([sys.executable, "-m", "fantasybot", "agent", "--execute"])
             finally:
-                _RUNNING = False
+                _RUNNING = False   # single atomic write; the guard above prevents races
 
-        _RUNNING = True
         threading.Thread(target=go, daemon=True).start()
         self._send(202, "application/json", b'{"ok":true}')
 
