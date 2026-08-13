@@ -52,7 +52,7 @@ class FantasyClient:
         req = urllib.request.Request(config.API_BASE + path, data=data,
                                      headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=30) as resp:
                 raw = resp.read().decode("utf-8")
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as e:

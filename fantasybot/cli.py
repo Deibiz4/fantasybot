@@ -126,7 +126,12 @@ def cmd_optimize(args):
     fc = FantasyClient()
     lid, tid = fc.default_ids()
     team = fc.team(lid, tid)
-    best = lineup_opt.optimize(team)
+    try:
+        best = lineup_opt.optimize(team)
+    except ValueError as e:
+        # Incomplete squad (no goalkeeper / fewer than 11): can't field a valid XI.
+        print(f"Can't build a lineup: {e}")
+        return
     if args.json and not args.apply:
         return _print_json(best)
     d, m, f = best["formation"]
@@ -138,7 +143,9 @@ def cmd_optimize(args):
             print(f"  {pos[:3].upper()}  {e['nombre']:<20} prob={prob:<5} "
                   f"score={e['score']}{disp}")
 
-    xi = lineup_opt.payload_ids(best)
+    # Normalise both sides to str: payload_ids may hold ints, and the left side is
+    # str()-wrapped, so an int/str mismatch would mark every player a substitute.
+    xi = {str(i) for i in lineup_opt.payload_ids(best)}
     banked = [p["playerMaster"].get("nickname") for p in team["players"]
               if str(p.get("playerTeamId") or p["playerMaster"]["id"]) not in xi]
     print(f"\nSubstitutes (outside the XI): {banked}")
@@ -217,9 +224,12 @@ def cmd_agent(args):
         print(f"Next matchday: {md['kickoff']}"
               + (f"  ({dias:.1f} days left)" if dias is not None else ""))
     lu = rep["lineup"]
-    d, m, f = lu["formation"]
-    tag = "  (WORTH CHANGING)" if lu["changed"] else "  (already the best)"
-    print(f"Optimal lineup: {d}-{m}-{f}{tag}")
+    if lu["formation"]:
+        d, m, f = lu["formation"]
+        tag = "  (WORTH CHANGING)" if lu["changed"] else "  (already the best)"
+        print(f"Optimal lineup: {d}-{m}-{f}{tag}")
+    else:
+        print(f"Optimal lineup: can't build one — {lu.get('note', 'incomplete squad')}")
     for w in lu.get("watch", []):
         print(f"  ⚠ {w['nombre']} ({w['valor']:,}) outside the likely XI "
               f"— transfer/injury? watch (sell?)")
@@ -258,7 +268,14 @@ def cmd_agent(args):
     # --- autonomous execution (line up + bid; buyout clauses NOT) ---
     lid, tid = fc.default_ids()
     team = fc.team(lid, tid)
-    best = lineup_opt.optimize(team)
+    try:
+        best = lineup_opt.optimize(team)
+    except ValueError as e:
+        # Incomplete squad (e.g. no goalkeeper): can't field a valid XI, so there's
+        # nothing safe to auto-apply. Surface it and skip acting, don't crash the run.
+        print(f"\n--- AUTONOMOUS ACTIONS [skipped] ---")
+        print(f"· Can't act: incomplete squad ({e}). Sign the missing position first.")
+        return
     current = agent_mod._current_xi_ids(fc, tid)
     result = execute_mod.act(fc, lid, tid, team, best, current,
                              dry_run=not args.execute)

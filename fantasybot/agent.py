@@ -125,17 +125,27 @@ def review(client, days_to_matchday=None):
     events = state.diff_snapshots(prev, curr)
     state.save_snapshot(curr)
 
-    # 2) lineup
-    best = lineup_opt.optimize(team, prob_index)
-    best_ids = lineup_opt.payload_ids(best)
-    lineup_changed = best_ids != _current_xi_ids(client, tid)
+    # 2) lineup — a squad that can't field a valid XI (e.g. no goalkeeper mid-rebuild)
+    # must not crash the whole review: report it and carry on so gaps/needs still fire.
+    try:
+        best = lineup_opt.optimize(team, prob_index)
+        best_ids = lineup_opt.payload_ids(best)
+        lineup_changed = best_ids != _current_xi_ids(client, tid)
+        lineup_section = {"formation": best["formation"], "changed": lineup_changed,
+                          "total": best["total"], "watch": best.get("watch", [])}
+    except ValueError as e:
+        best, lineup_changed = None, False
+        lineup_section = {"formation": None, "changed": False, "total": 0,
+                          "watch": [], "note": str(e)}
 
     # 3) flips, needs and sales
     flips = [o for o in flip.opportunities(client, lid)
              if o["margin_pct"] > 0 and o["buy_price"] <= team["teamMoney"]][:5]
     gaps = needs_mod.gaps(team)
     needs_report = needs_mod.advise(client, lid, team, days_to_matchday)
-    sells = sell_mod.sell_candidates(team, best, trends_index())
+    # sells rank against the optimal XI; without one (incomplete squad) there's nothing
+    # to recommend selling yet.
+    sells = sell_mod.sell_candidates(team, best, trends_index()) if best else []
 
     # 4) buyout targets + reminders
     targets = clause_targets(market, team, prob_index)
@@ -178,8 +188,7 @@ def review(client, days_to_matchday=None):
         "events": events,
         "money": team["teamMoney"],
         "matchday": {"kickoff": kickoff, "days": days_to_matchday},
-        "lineup": {"formation": best["formation"], "changed": lineup_changed,
-                   "total": best["total"], "watch": best.get("watch", [])},
+        "lineup": lineup_section,
         "flips": flips,
         "gaps": gaps,
         "needs": needs_report,

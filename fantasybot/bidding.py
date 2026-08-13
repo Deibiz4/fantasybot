@@ -40,7 +40,14 @@ def decide(value, other_bids, seconds_left, max_bid, final=DEFAULT_FINAL):
 
 
 def _seconds_left(close_iso):
-    close = datetime.fromisoformat(close_iso)
+    # A malformed/missing close time must never crash the bid loop. Unknown -> treat as
+    # "plenty of time left" (non-urgent), so decide() won't fire the final-window bid.
+    try:
+        close = datetime.fromisoformat(close_iso)
+    except (TypeError, ValueError):
+        return 3600.0
+    if close.tzinfo is None:  # naive timestamp -> assume UTC to avoid a TypeError subtract
+        close = close.replace(tzinfo=timezone.utc)
     return (close - datetime.now(timezone.utc)).total_seconds()
 
 
