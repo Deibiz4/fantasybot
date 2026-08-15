@@ -43,6 +43,11 @@ def caliber_prior(market_value):
 
 
 NOT_IN_XI_SCORE = 5.0  # on his team but futbolfantasy doesn't list him as a starter → ~0%
+DOUBTFUL_DISCOUNT = 0.6  # a 'duda' usually plays: rank below a fit player, ABOVE an injured one
+
+# LaLiga playerStatus values that mean "probably plays, but with risk". Everything else
+# that isn't "ok" is treated as won't-play (score 0) — conservative for unknown statuses.
+_DOUBTFUL_STATUS = ("doubtful", "duda", "warned")
 
 
 def player_score(player, prob_index):
@@ -53,15 +58,20 @@ def player_score(player, prob_index):
       - 'not_in_xi' : on his team but NOT in the probable lineup → ~0% (real bench;
                       in transfers, a signal to watch).
       - 'unknown'   : doesn't appear on futbolfantasy → we estimate from his value.
-      - 'out'       : injured/suspended/unavailable.
+      - 'doubtful'  : a 'duda' — probably plays; scored at a risk discount so he beats
+                      an injured player for a slot but sits below a fit one.
+      - 'out'       : injured/suspended/unavailable → won't play, scores 0.
     """
     pm = player["playerMaster"]
     info = match_name(pm.get("nickname", ""), pm.get("name", ""), prob_index)
     prob = info.get("prob") if info else None
 
-    disponible = pm.get("playerStatus", "ok") == "ok"
+    status = (pm.get("playerStatus") or "ok").lower()
+    doubtful = status in _DOUBTFUL_STATUS
+    disponible = status == "ok" or doubtful   # a doubtful player is still fieldable & may score
+    # futbolfantasy is a second injury source; it only ever makes things worse (out).
     if info and (info.get("lesionado") or not info.get("disponible", True)):
-        disponible = False
+        disponible, doubtful = False, False
 
     if not disponible:
         base, tag = 0.0, "out"
@@ -71,6 +81,9 @@ def player_score(player, prob_index):
         base, tag = float(prob), "in_xi"
     else:
         base, tag = NOT_IN_XI_SCORE, "not_in_xi"
+    if doubtful:
+        base *= DOUBTFUL_DISCOUNT   # risk: below a fit player of the same prob, above injured (0)
+        tag = "doubtful"
     base += (pm.get("lastSeasonPoints") or 0) * 0.001  # tiebreaker
     return base, prob, disponible, tag
 

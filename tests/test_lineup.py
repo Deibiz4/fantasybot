@@ -105,6 +105,24 @@ class TestLineupNeverEmptyNeverUnavailable(unittest.TestCase):
         # the injured defenders ARE fielded (kept in position), not swapped for mids
         self.assertEqual(set(p["defender"]), {"d1", "d2", "d3"})
 
+    def test_doubtful_is_fielded_over_injured(self):
+        """A 'duda' plays more often than not, so for a contested slot it must be
+        preferred over an injured player (who scores 0). Four forwards for three slots:
+        two fit, one doubtful, one injured -> the injured one sits, the doubtful starts.
+        """
+        players = [_player("gk1", 1, 5_000_000)]
+        players += [_player(f"d{i}", 2, 8_000_000) for i in range(1, 4)]   # 3 fit DEF
+        players += [_player(f"m{i}", 3, 8_000_000) for i in range(1, 5)]   # 4 fit MED
+        players += [_player("s1", 4, 20_000_000), _player("s2", 4, 18_000_000)]  # 2 fit DEL
+        players += [_player("s_doubt", 4, 15_000_000, status="doubtful"),
+                    _player("s_inj", 4, 15_000_000, status="injured")]
+        best = optimize({"players": players}, prob_index={})
+        strikers = set(best["payload"]["striker"])
+        self.assertIn("s_doubt", strikers,
+                      "a doubtful player must beat an injured one for the slot")
+        self.assertNotIn("s_inj", strikers,
+                         "an injured player must not be fielded when a doubtful one is free")
+
     def test_healthy_squad_unchanged(self):
         """A healthy squad still gets a full, all-available XI (no regression)."""
         players = [_player("gk1", 1, 5_000_000)]
