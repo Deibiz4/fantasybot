@@ -92,22 +92,32 @@ def _entry(player, score, prob, disponible, tag):
     }
 
 
-def _fill(need, avail, gk, pool):
-    """Fill a formation, position by position, NEVER leaving a slot empty.
+def _fill(need, by_pos, gk, pool):
+    """Fill a formation, position by position, preferring a player OF THAT POSITION.
 
-    First takes the best AVAILABLE players of each position. If a position is short
-    (injury crisis), it backfills the missing slots from `pool` — the global bench,
-    ordered available-first — so we never send an unavailable/empty slot. Returns
-    (picks, unavailable_in_xi) or None if the squad can't fill 11 at all.
+    LaLiga silently drops a player fielded OUT of position (a midfielder sent as a
+    defender comes back off the lineup), so borrowing from another line to plug a hole
+    leaves the slot empty anyway. But LaLiga KEEPS an injured/suspended player who is
+    in the right position — he just scores 0. So each line is filled from ITS OWN
+    players: available ones first, then that line's injured players (a legal slot that
+    scores 0) rather than a healthy player from another line. Only when a position
+    hasn't enough players of its own to fill the formation at all do we borrow from the
+    global bench (`pool`) as a last resort — an emergency where no legal XI exists and a
+    dropped slot is unavoidable. Returns (picks, unavailable_in_xi) or None if the
+    squad can't field 11 even after borrowing.
     """
     used = {gk["playerTeamId"]}
     picks = {}
     for pos, n in need.items():
-        take = [e for e in avail[pos] if e["playerTeamId"] not in used][:n]
+        # own players of this line, available first then injured (all position-valid)
+        own = [e for e in by_pos[pos] if e["playerTeamId"] not in used]
+        own.sort(key=lambda e: (not e["disponible"], -e["score"]))
+        take = own[:n]
         for e in take:
             used.add(e["playerTeamId"])
         picks[pos] = take
-    # backfill shortfalls from the global bench (available players first)
+    # last resort ONLY: a line with fewer players than slots borrows cross-position
+    # (LaLiga may drop it, but an emergency XI beats an empty payload)
     bench = [e for e in pool if e["playerTeamId"] not in used]
     bi = 0
     for pos, n in need.items():
@@ -125,11 +135,12 @@ def _fill(need, avail, gk, pool):
 def optimize(team, prob_index=None):
     """Computes the best XI + formation. Returns a dict with the proposal and the body.
 
-    Guarantees a COMPLETE XI: every slot of the chosen formation is filled, and no
-    unavailable (injured/suspended) player is fielded as long as the squad has enough
-    available players to field 11 — backfilling from the available bench if a position
-    runs short. LaLiga silently drops an unavailable player, so fielding one leaves the
-    slot empty; this never does that when it can be avoided.
+    Guarantees a COMPLETE, LEGAL XI: every slot of the chosen formation is filled by a
+    player OF THAT POSITION, preferring available players and using a line's own injured
+    players only to backfill that same line (see `_fill`). LaLiga drops a player fielded
+    out of position but keeps an injured one who is in position (he scores 0), so a
+    position-valid XI is what actually reaches the pitch — a healthy player borrowed into
+    the wrong line would be silently dropped and leave the slot empty.
     """
     if prob_index is None:
         prob_index = probable_lineups()
@@ -166,7 +177,7 @@ def optimize(team, prob_index=None):
         # prefer formations we can fill entirely from AVAILABLE players of each position
         full_available = (len(avail["defender"]) >= d and len(avail["midfield"]) >= m
                           and len(avail["striker"]) >= f)
-        filled = _fill(need, avail, gk, pool)
+        filled = _fill(need, by_pos, gk, pool)
         if filled is None:
             continue  # can't field 11 in this shape
         picks, unavailable = filled

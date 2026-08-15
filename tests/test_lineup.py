@@ -1,8 +1,14 @@
-"""Lineup optimizer: it must never field an UNAVAILABLE player, and it must never
-leave a formation slot empty (it backfills from the available bench instead).
+"""Lineup optimizer: it must always send a COMPLETE, POSITION-VALID XI.
 
-Regression for the reported bug: the agent removed an injured striker from the XI
-and left the slot empty (LaLiga drops an unavailable player from the lineup).
+LaLiga's rule (confirmed live): a player fielded OUT of position is silently dropped
+(a midfielder sent as a defender comes off the lineup, leaving the slot empty), but a
+player who is injured/suspended yet IN position is KEPT — he just scores 0. So the
+optimizer must fill each line from its OWN players, using a line's injured players to
+backfill that same line rather than borrowing a healthy player from another line.
+
+Regression for the reported bug: a thin, injury-hit defence made the optimizer plug
+defender slots with midfielders; LaLiga dropped them and the '11' it applied reached
+the pitch as 9. The fix keeps every slot position-valid.
 
 Run with:  python -m unittest discover -s tests
 """
@@ -52,13 +58,15 @@ def _slot_counts(best):
 
 
 class TestLineupNeverEmptyNeverUnavailable(unittest.TestCase):
-    def test_forced_defender_crisis_backfills_available(self):
-        """Only 1 available defender but the squad has plenty of available midfielders.
+    def test_forced_defender_crisis_stays_position_valid(self):
+        """Only 1 available defender, plenty of available midfielders.
 
-        Old behaviour: the only count-feasible formations need 3 defenders, so the
-        optimizer fills the two missing defender slots with INJURED defenders -> those
-        slots come back empty when the lineup is sent. The optimizer must instead
-        backfill from the available bench so every fielded player is available.
+        Every legal formation needs >= 3 defenders. The squad owns exactly 3 defenders,
+        two of them injured. The optimizer must field those injured defenders in the
+        defender slots (LaLiga keeps them, they score 0) and NOT plug the holes with
+        healthy midfielders — a midfielder sent as a defender is dropped by LaLiga, so
+        that 'trick' would reach the pitch as a 9-player XI. The extra midfielders stay
+        on the bench.
         """
         players = [
             _player("gk1", 1, 5_000_000),
@@ -84,14 +92,18 @@ class TestLineupNeverEmptyNeverUnavailable(unittest.TestCase):
         self.assertEqual(counts["midfield"], m)
         self.assertEqual(counts["striker"], f)
 
-        # and nobody fielded is unavailable
-        fielded = payload_ids(best)
-        self.assertEqual(len(fielded), 11)
-        injured = {"d2", "d3"}
-        self.assertFalse(fielded & injured,
-                         f"unavailable players fielded: {fielded & injured}")
-        self.assertEqual(fielded, _available_ids(best),
-                         "every fielded player must be available")
+        # 11 fielded, and EVERY slot is position-valid (this is what LaLiga accepts)
+        p = best["payload"]
+        self.assertEqual(len(payload_ids(best)), 11)
+        defenders, mids, strikers = {"d1", "d2", "d3"}, \
+            {"m1", "m2", "m3", "m4", "m5", "m6"}, {"s1", "s2", "s3"}
+        self.assertTrue(set(p["defender"]) <= defenders,
+                        f"non-defenders in the defender line: "
+                        f"{set(p['defender']) - defenders}")
+        self.assertTrue(set(p["midfield"]) <= mids)
+        self.assertTrue(set(p["striker"]) <= strikers)
+        # the injured defenders ARE fielded (kept in position), not swapped for mids
+        self.assertEqual(set(p["defender"]), {"d1", "d2", "d3"})
 
     def test_healthy_squad_unchanged(self):
         """A healthy squad still gets a full, all-available XI (no regression)."""
