@@ -6,15 +6,12 @@ now degrade: no lineup, but the rest (gaps/needs) still reported so the user is 
 sign one.
 """
 
-import os
 import tempfile
 import unittest
 from unittest import mock
 
-os.environ["FANTASYBOT_HOME"] = tempfile.mkdtemp(prefix="fb-nogk-")
-
-from fantasybot import agent as agent_mod  # noqa: E402
-from fantasybot.strategy import lineup as lineup_opt  # noqa: E402
+from fantasybot import agent as agent_mod
+from fantasybot.strategy import lineup as lineup_opt
 
 
 def _player(pid, position_id, value=1_000_000):
@@ -63,6 +60,21 @@ class OptimizeContract(unittest.TestCase):
 
 class ReviewResilience(unittest.TestCase):
     def setUp(self):
+        # Isolate state regardless of test import order or the repository path.
+        state_dir = self.enterContext(tempfile.TemporaryDirectory(prefix="fb-nogk-"))
+        for name, filename in [
+            ("STATE_DIR", None),
+            ("SNAPSHOT_PATH", "snapshot.json"),
+            ("TASKS_PATH", "tasks.json"),
+            ("REMINDERS_PATH", "reminders.json"),
+            ("BIDS_PATH", "bids.json"),
+            ("BID_PLAN_PATH", "bid_plan.json"),
+        ]:
+            value = state_dir if filename is None else f"{state_dir}/{filename}"
+            patcher = mock.patch.object(agent_mod.state, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
         # Stub the external/scraper calls so review() runs fully offline.
         for target, val in [
             ("probable_lineups", lambda *a, **k: {}),
@@ -92,6 +104,10 @@ class ReviewResilience(unittest.TestCase):
         self.assertIsInstance(rep["sells"], list)
         self.assertIn("POR", rep["gaps"])            # the GK gap IS surfaced
 
+    def test_full_squad_review_still_produces_a_lineup(self):
+        rep = agent_mod.review(_FakeClient(_squad(with_gk=True)))
+        self.assertIsNotNone(rep["lineup"]["formation"])
+
 
 class SellWithoutLineup(unittest.TestCase):
     """A missing lineup (best=None) must not silence sell advice: falling-value players
@@ -108,11 +124,6 @@ class SellWithoutLineup(unittest.TestCase):
             out = sell.sell_candidates(team, None, trends)
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["nombre"], "Falling")
-
-    def test_full_squad_review_still_produces_a_lineup(self):
-        rep = agent_mod.review(_FakeClient(_squad(with_gk=True)))
-        self.assertIsNotNone(rep["lineup"]["formation"])
-
 
 if __name__ == "__main__":
     unittest.main()
