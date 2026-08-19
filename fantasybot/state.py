@@ -38,9 +38,12 @@ def load_bid_plan() -> list:
     return _read(BID_PLAN_PATH, [])
 
 
-def add_bid_target(market_id: str, max_bid: int):
+def add_bid_target(market_id: str, max_bid: int, nombre: str | None = None):
     plan = [t for t in load_bid_plan() if t["market_id"] != market_id]
-    plan.append({"market_id": market_id, "max_bid": max_bid})
+    entry = {"market_id": market_id, "max_bid": max_bid}
+    if nombre:
+        entry["nombre"] = nombre  # store the player name so displays never guess it
+    plan.append(entry)
     _write(BID_PLAN_PATH, plan)
 
 
@@ -115,6 +118,22 @@ def add_task(text: str, due=None, key=None) -> dict:
     tasks.append(task)
     save_tasks(tasks)
     return task
+
+
+def expire_tasks(prefix: str, max_age_days: int, now=None) -> int:
+    """Drop tasks whose key starts with `prefix` and were created > max_age_days ago.
+    Returns how many were removed. For recommendation tasks (e.g. "llm-rec:*") that have
+    no natural completion signal and would otherwise accumulate indefinitely."""
+    now = int(time.time()) if now is None else int(now)
+    cutoff = now - max_age_days * 86400
+    tasks = load_tasks()
+    kept = [t for t in tasks
+            if not (str(t.get("key", "")).startswith(prefix)
+                    and (t.get("created") or 0) < cutoff)]
+    removed = len(tasks) - len(kept)
+    if removed:
+        save_tasks(kept)
+    return removed
 
 
 def complete_task(task_id: int):
