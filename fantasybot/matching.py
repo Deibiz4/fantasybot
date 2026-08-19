@@ -38,7 +38,12 @@ def match_name(nickname: str, full_name: str, index: dict):
         return index[full]
     tokens = [t for t in nick.split() if len(t) > 2]
     if tokens:
-        for key, value in index.items():
-            if all(t in key for t in tokens):
-                return value
+        # Only trust a token match if it's UNIQUE. A short/common nickname
+        # ("Pedro", "Álvarez") is a subset of several names; returning an arbitrary
+        # one is a false positive (what SANITY_MAX_DIFF in flip.py papers over).
+        # Ambiguous -> no confident match. The ID crosswalk is the real fix.
+        hits = [value for key, value in index.items()
+                if all(t in key for t in tokens)]
+        if len(hits) == 1:
+            return hits[0]
     return None
