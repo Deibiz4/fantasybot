@@ -26,8 +26,25 @@ def daily_rate(trend) -> float:
     return sum(rates) / len(rates) if rates else 0.0
 
 
+def _falling_now(trend) -> bool:
+    """True when the FRESH signal says the player is turning down, regardless of the older
+    3/7-day windows: futbolfantasy's own `tendencia` is negative, or the value fell over
+    the last day (valor < valor1). This is the same `tendencia` the sell engine trusts."""
+    v, v1, tend = trend.get("valor"), trend.get("valor1"), trend.get("tendencia")
+    if tend is not None and tend < 0:
+        return True
+    return v is not None and bool(v1) and v < v1
+
+
 def project(trend, horizon) -> float:
-    return (trend.get("valor") or 0) + daily_rate(trend) * horizon * DAMPING
+    """Projected value at `horizon` days. The 3/7-day rate LAGS: a player can rise all
+    week yet peak and turn down today. When the fresh signal says he's already falling we
+    must NOT extrapolate the stale rise (that buys him at the top and reads as a bogus
+    "+1%" flip), so a positive rate is suppressed in that case."""
+    rate = daily_rate(trend)
+    if rate > 0 and _falling_now(trend):
+        rate = 0.0
+    return (trend.get("valor") or 0) + rate * horizon * DAMPING
 
 
 def evaluate(element, index, horizon):
