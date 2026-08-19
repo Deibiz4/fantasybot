@@ -36,6 +36,11 @@ def market_close(market):
     return min(times) if times else None
 
 
+MIN_CLAUSE_PROB = 40  # don't recommend BUYING a player unlikely to start: a benchwarmer
+                      # (e.g. a backup keeper at ~10%) scores 0, so a buyout on him is
+                      # wasted money. Unknown prob (name unmatched) is kept, not penalised.
+
+
 def clause_targets(market, team, prob_index):
     """Other managers' players worth signing via buyout clause when it opens.
 
@@ -58,13 +63,16 @@ def clause_targets(market, team, prob_index):
         if not (clause and unlock and pos in gap_positions and clause <= money):
             continue
         info = match_name(pm.get("nickname", ""), pm.get("name", ""), prob_index)
+        prob = info.get("prob") if info else None
+        if prob is not None and prob < MIN_CLAUSE_PROB:
+            continue  # benchwarmer: a buyout on him is wasted money, don't recommend it
         targets.append({
             "nombre": pm.get("nickname") or pm.get("name"),
             "player_id": pm["id"],
             "pos": pos,
             "clause": clause,
             "unlock": unlock,
-            "prob": info.get("prob") if info else None,
+            "prob": prob,
             "reason": f"fills a {pos} gap",
         })
     targets.sort(key=lambda t: (t["prob"] or 0), reverse=True)
