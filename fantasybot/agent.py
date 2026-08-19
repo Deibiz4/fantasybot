@@ -116,6 +116,30 @@ def _current_xi_ids(client, team_id):
     return ids
 
 
+def lineup_lock_reminder(kickoff, now=None):
+    """The "set your FINAL LINEUP" reminder — but ONLY on the day the matchday's first
+    match is actually played.
+
+    During the odd early-season gameweeks the next kickoff can be several days out, and
+    surfacing "set your lineup" that early just confuses (a user saw it for a jornada
+    that didn't start until 3 days later). We compare calendar DAYS in Spain time, so the
+    notice appears on match day itself and not before. Returns the reminder dict, or None.
+    """
+    dt = _parse(kickoff) if kickoff else None
+    if not dt:
+        return None
+    tz = matchday.SPAIN_TZ
+    now = now or datetime.now(tz)
+    if dt.astimezone(tz).date() != now.astimezone(tz).date():
+        return None  # first match isn't today -> don't nag about the lineup yet
+    return {
+        "key": f"lineup_lock:{kickoff}",
+        "fire_at": (dt - timedelta(hours=2)).isoformat(),
+        "event_at": kickoff,
+        "message": "Matchday is today: set your FINAL LINEUP.",
+    }
+
+
 def review(client, days_to_matchday=None):
     lid, tid = client.default_ids()
     team = client.team(lid, tid)
@@ -179,15 +203,16 @@ def review(client, days_to_matchday=None):
                 "message": (f"{t['nombre']}'s clause opens: prepare a buyout "
                             f"of {t['clause']:,} ({t['reason']})."),
             })
-    if kickoff:
-        kdt = _parse(kickoff)
-        if kdt:
-            reminders.append({
-                "key": f"lineup_lock:{kickoff}",
-                "fire_at": (kdt - timedelta(hours=2)).isoformat(),
-                "event_at": kickoff,
-                "message": "Matchday starts in 2h: set your FINAL LINEUP.",
-            })
+    # The lineup lock is about the NEXT gameweek that hasn't started — not today's match
+    # if the current jornada is already under way (its lineup is already locked). A
+    # scraper hiccup here must never crash the whole daily review.
+    try:
+        gw_kickoff = matchday.next_gameweek_kickoff()
+    except Exception:
+        gw_kickoff = None
+    lineup_rem = lineup_lock_reminder(gw_kickoff)
+    if lineup_rem:
+        reminders.append(lineup_rem)
     reminders.sort(key=lambda r: r["fire_at"])
 
     _sync_tasks(gaps, targets, sells, lineup_changed)

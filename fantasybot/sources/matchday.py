@@ -39,8 +39,13 @@ def _parse_match_datetime(html):
 
 
 def _match_slugs(limit=10):
-    """Slugs of upcoming matches (lowest id = nearest matchday)."""
-    html = net.get(config.FF_LINEUPS_INDEX)
+    """Slugs of upcoming matches (lowest id = nearest matchday). Returns [] if the index
+    can't be fetched, so callers degrade to 'unknown' instead of raising (a scraper hiccup
+    must never crash the daily review)."""
+    try:
+        html = net.get(config.FF_LINEUPS_INDEX)
+    except Exception:
+        return []
     slugs = re.findall(r"/partidos/(\d+-[a-z0-9-]+)", html)
     # sort by numeric id and keep the first ones (one matchday)
     uniq = sorted(set(slugs), key=lambda s: int(s.split("-")[0]))
@@ -75,3 +80,66 @@ def days_until_matchday():
         return None
     dt = datetime.fromisoformat(iso)
     return (dt - datetime.now(timezone.utc)).total_seconds() / 86400
+
+
+# --- next GAMEWEEK (jornada) start ------------------------------------------------
+# next_kickoff() is the nearest match of ANY jornada. But a jornada can be spread over
+# many days (postponed matches), and jornadas can even overlap — jornada 1 might still
+# have matches next week while jornada 2 has already begun. What matters for locking a
+# lineup and for the "balance must be >= 0 at kickoff" rule is the start of the next
+# jornada that HASN'T begun yet, not just the next match on the calendar.
+
+def _pick_next_gameweek_start(first_by_jornada, now):
+    """From {jornada_number: first_match_dt}, the kickoff of the next gameweek that has
+    NOT started — the earliest per-jornada first match still in the future. A jornada
+    whose first match already passed has begun (its lineup is locked), so it's skipped.
+    None if every known gameweek has already started."""
+    future = [dt for dt in first_by_jornada.values() if dt and dt > now]
+    return min(future) if future else None
+
+
+# The lineups index also lists OTHER competitions (e.g. Premier League), whose match
+# pages ALSO carry a bare "Jornada N" (their own matchweek). Mixing a PL matchweek into
+# the LaLiga map would pick the wrong gameweek — so require the LaLiga context explicitly
+# (the page header reads e.g. "LaLiga 2026/27 - Jornada 2").
+_LALIGA_JORNADA = re.compile(r"LaLiga[^<]{0,40}[Jj]ornada\s*(\d+)")
+
+
+def _first_match_by_jornada(max_laliga=30, max_fetch=60):
+    """{jornada_number: earliest LaLiga match datetime}. Scans upcoming match pages,
+    keeping ONLY LaLiga ones, until it has `max_laliga` of them — enough to span several
+    jornadas so the next unstarted one is found even though slug-id order is NOT kickoff
+    order (a jornada's true first match can sit late in its id block)."""
+    first, seen = {}, 0
+    for slug in _match_slugs(limit=max_fetch):
+        try:
+            html = net.get(MATCH_URL.format(slug=slug))
+        except Exception:
+            continue
+        m = _LALIGA_JORNADA.search(html)
+        if not m:
+            continue  # not a LaLiga match (or unparseable) -> skip
+        dt = _parse_match_datetime(html)
+        if dt is None:
+            continue
+        jor = int(m.group(1))
+        if jor not in first or dt < first[jor]:
+            first[jor] = dt
+        seen += 1
+        if seen >= max_laliga:
+            break
+    return first
+
+
+def _compute_next_gameweek_kickoff():
+    picked = _pick_next_gameweek_start(_first_match_by_jornada(),
+                                       datetime.now(timezone.utc))
+    return picked.isoformat() if picked else None
+
+
+def next_gameweek_kickoff():
+    """ISO datetime of the first match of the next gameweek (jornada) that hasn't started
+    yet — the deadline that matters for the lineup lock and for keeping the balance >= 0.
+    Mid-jornada this points at the FOLLOWING jornada, not the current one's remaining
+    matches. Cached 6h. None if it can't be determined."""
+    return cache.cached("next_gameweek_kickoff", CACHE_TTL, _compute_next_gameweek_kickoff)
