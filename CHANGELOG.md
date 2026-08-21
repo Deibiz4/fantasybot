@@ -62,3 +62,13 @@ All notable changes to the **fantasybot** project for rival tracking, transfer a
 #### 8. Unit Tests (`tests/test_rivals.py`, `tests/test_history.py`, `tests/test_scouting.py`)
 - Added comprehensive unit tests covering activity parsing, clause protection analysis, rival accounting, trade ROI, and scouting analysis.
 - All unit tests passing.
+
+### Fixed & Security Hardening
+
+- **CLI Watch Command Architecture (`fantasybot/cli.py`)**: Restored clean execution lifecycle for `cmd_watch` (Ctrl+C event loop, browser launcher, background daemon threads) and separated `cmd_scout` into dedicated function.
+- **Activity Pagination & Network Safety (`fantasybot/api.py`)**: Capped activity scraping at 100 pages, verified list types, and re-raised exceptions on initial page load to prevent state corruption while gracefully handling network hiccups on subsequent pages.
+- **Null Safety in Flips (`fantasybot/strategy/flip.py`)**: Added defensive `.get()` chaining on `playerTeam` and `sellerTeam` to prevent `NoneType` crashes during market scans.
+- **Chronological FIFO Lot Matching (`fantasybot/strategy/history.py`)**: Rebuilt trade matching with an ordered open buy lot queue, ensuring accurate P&L calculation and properly distinguishing day 1 squad sales from realized flips.
+- **Player Cache Hygiene (`fantasybot/strategy/history.py`)**: Fixed `None` check to avoid caching `"None"` keys, and prevented persistent disk storage of placeholder names on network failures.
+- **Incremental Traffic Optimization (`fantasybot/strategy/rivals.py`)**: Switched to page 0 incremental polling for leagues with existing local history, substantially reducing HTTP request volume.
+- **Atomic State Persistence (`fantasybot/state.py`)**: Implemented atomic file replacement (`.tmp` + `os.replace`) to guarantee data integrity across process interruptions and crashes.
