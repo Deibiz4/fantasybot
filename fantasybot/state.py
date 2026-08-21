@@ -305,11 +305,11 @@ def record_activity(new_items: list, league_id: str) -> list:
     lg_key = str(league_id)
     known = {}
     for item in raw.get(lg_key, []):
-        iid = str(item.get("id") or f"{item.get('activityTypeId')}_{item.get('user1Id')}_{item.get('amount')}_{item.get('createdAt')}")
+        iid = str(item.get("id") or f"{item.get('activityTypeId')}_{item.get('user1Id')}_{item.get('user2Id')}_{item.get('playerMasterId')}_{item.get('amount')}_{item.get('createdAt')}")
         known[iid] = item
 
     for item in new_items or []:
-        iid = str(item.get("id") or f"{item.get('activityTypeId')}_{item.get('user1Id')}_{item.get('amount')}_{item.get('createdAt')}")
+        iid = str(item.get("id") or f"{item.get('activityTypeId')}_{item.get('user1Id')}_{item.get('user2Id')}_{item.get('playerMasterId')}_{item.get('amount')}_{item.get('createdAt')}")
         known[iid] = item
 
     merged = sorted(known.values(), key=lambda x: str(x.get("createdAt") or x.get("id") or ""))

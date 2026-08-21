@@ -119,19 +119,22 @@ class FantasyClient:
     def league_teams(self, league_id):
         return self.get(self._cmp(f"/leagues/{league_id}/teams?x-lang=es"))
 
-    def league_activity(self, league_id, fetch_all=True):
+    def league_activity(self, league_id, fetch_all=True, max_pages=100):
         if not fetch_all:
-            return self.get(self._cmp(f"/leagues/{league_id}/activity/0?x-lang=es"))
+            res = self.get(self._cmp(f"/leagues/{league_id}/activity/0?x-lang=es"))
+            return res if isinstance(res, list) else []
         all_acts = []
-        idx = 0
-        while True:
+        for idx in range(max_pages):
             try:
                 r = self.get(self._cmp(f"/leagues/{league_id}/activity/{idx}?x-lang=es"))
-                if not r:
+                if not r or not isinstance(r, list):
                     break
                 all_acts.extend(r)
-                idx += 1
-            except Exception:
+                if len(r) == 0:
+                    break
+            except (FantasyError, OSError, json.JSONDecodeError) as e:
+                if idx == 0:
+                    raise
                 break
         return all_acts
 

@@ -161,14 +161,16 @@ def analyze_player_acquisitions(
     buy_map = {}
     if manager_id is not None:
         for a in activity_history or []:
-            if (a.get("activityTypeId") in (TYPE_MARKET_BUY, TYPE_DIRECT_TRANSFER)
-                    and a.get("user1Id") is not None
-                    and int(a.get("user1Id")) == manager_id):
-                pid = str(a.get("playerMasterId"))
-                buy_map[pid] = {
-                    "amount": a.get("amount") or 0,
-                    "date": str(a.get("createdAt") or "")[:10],
-                }
+            if a.get("activityTypeId") in (TYPE_MARKET_BUY, TYPE_DIRECT_TRANSFER) and a.get("user1Id") is not None:
+                try:
+                    if int(a.get("user1Id")) == manager_id:
+                        pid = str(a.get("playerMasterId"))
+                        buy_map[pid] = {
+                            "amount": a.get("amount") or 0,
+                            "date": str(a.get("createdAt") or "")[:10],
+                        }
+                except (ValueError, TypeError):
+                    continue
 
     enriched = []
     for p in players or []:
@@ -222,7 +224,13 @@ def analyze_rivals(
 ) -> List[Dict[str, Any]]:
     """Fetches teams and merges league activity into persistent history to calculate metrics."""
     teams = client.league_teams(league_id) or []
-    activity_live = client.league_activity(league_id) or []
+
+    # If we already have persistent history for this league, fetch page 0 (new events) to minimize requests
+    existing_history = state.load_activity_history(league_id)
+    if existing_history:
+        activity_live = client.league_activity(league_id, fetch_all=False) or []
+    else:
+        activity_live = client.league_activity(league_id, fetch_all=True) or []
 
     # Accumulate into persistent history (.state/activity_history.json)
     activity_cumulative = state.record_activity(activity_live, league_id)

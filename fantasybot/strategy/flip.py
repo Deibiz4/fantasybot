@@ -59,12 +59,21 @@ def evaluate(element, index, horizon):
         return None  # name match probably wrong
 
     if element["discr"] == "marketPlayerLeague":
-        via, buy_price = "SISTEMA", element.get("salePrice") or trend["valor"]
+        sale_p = element.get("salePrice") or 0
+        mv = pm.get("marketValue") or 0
+        trend_val = trend.get("valor") or 0
+        via, buy_price = "SISTEMA", max(sale_p, mv, trend_val)
+        owner = "Mercado Libre"
     else:
         via = "CLAUSULA"
-        buy_price = element.get("playerTeam", {}).get("buyoutClause")
+        buy_price = (element.get("playerTeam") or {}).get("buyoutClause")
         if not buy_price:
             return None
+        owner = (
+            ((element.get("sellerTeam") or {}).get("manager") or {}).get("managerName")
+            or ((element.get("playerTeam") or {}).get("manager") or {}).get("managerName")
+            or "Rival"
+        )
 
     proj = project(trend, horizon)
     margin = proj * (1 - SELL_COMMISSION) - buy_price
@@ -74,11 +83,13 @@ def evaluate(element, index, horizon):
         "player_id": pm.get("id"),
         "pos": POS.get(pm.get("positionId"), "?"),
         "via": via,
+        "owner": owner,
         "valor_actual": trend["valor"],
         "buy_price": buy_price,
         "proyeccion": round(proj),
         "margin": round(margin),
         "margin_pct": round(margin / buy_price * 100, 1) if buy_price else 0,
+        "last_season_points": int(pm.get("lastSeasonPoints") or 0),
         "rate_dia": round(daily_rate(trend)),
         "tendencia": trend.get("tendencia"),
     }

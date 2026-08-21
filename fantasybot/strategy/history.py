@@ -31,32 +31,38 @@ def resolve_player_names(
     for t in teams or []:
         for p in t.get("players", []):
             pm = p.get("playerMaster") or {}
-            pid = str(pm.get("id"))
-            if pid:
-                cache[pid] = {
-                    "name": pm.get("nickname") or pm.get("name") or f"Player #{pid}",
-                    "pos": POS.get(pm.get("positionId"), "?"),
-                    "market_value": pm.get("marketValue") or 0,
-                }
+            pid = pm.get("id")
+            if pid is not None:
+                pid_str = str(pid)
+                name = pm.get("nickname") or pm.get("name")
+                if name:
+                    cache[pid_str] = {
+                        "name": name,
+                        "pos": POS.get(pm.get("positionId"), "?"),
+                        "market_value": pm.get("marketValue") or 0,
+                    }
 
     # Find any missing playerMasterIds from activity
     needed_pids = set()
     for a in activity_history or []:
         pid = a.get("playerMasterId")
-        if pid and str(pid) not in cache:
+        if pid is not None and str(pid) not in cache:
             needed_pids.add(str(pid))
 
     if needed_pids:
         for pid in needed_pids:
             try:
                 r = client.get(f"/v1/competition/1/player/{pid}?x-lang=es")
-                cache[pid] = {
-                    "name": r.get("nickname") or r.get("name") or f"Player #{pid}",
-                    "pos": POS.get(r.get("positionId"), "?"),
-                    "market_value": r.get("marketValue") or 0,
-                }
+                name = r.get("nickname") or r.get("name")
+                if name:
+                    cache[pid] = {
+                        "name": name,
+                        "pos": POS.get(r.get("positionId"), "?"),
+                        "market_value": r.get("marketValue") or 0,
+                    }
             except Exception:
-                cache[pid] = {"name": f"Player #{pid}", "pos": "?", "market_value": 0}
+                # Do not persist placeholders permanently to disk so future runs can retry
+                pass
         state.save_players_cache(cache)
 
     return cache
@@ -73,12 +79,13 @@ def compute_manager_trading_history(
         atype = a.get("activityTypeId")
         u1 = a.get("user1Id")
         u2 = a.get("user2Id")
-        pid = str(a.get("playerMasterId") or "")
-        amt = a.get("amount") or 0
-        dt = str(a.get("createdAt") or "")[:10]
-
-        if not pid:
+        pid = a.get("playerMasterId")
+        if pid is None:
             continue
+        pid = str(pid)
+        amt = a.get("amount") or 0
+        raw_dt = str(a.get("createdAt") or "")
+        dt = raw_dt[:10]
 
         try:
             u1_int = int(u1) if u1 is not None else None
@@ -87,13 +94,16 @@ def compute_manager_trading_history(
             continue
 
         if atype in (TYPE_MARKET_BUY, TYPE_DIRECT_TRANSFER) and u1_int == manager_id:
-            user_events.append({"action": "BUY", "pid": pid, "amount": amt, "date": dt})
+            user_events.append({"action": "BUY", "pid": pid, "amount": amt, "date": dt, "raw_date": raw_dt})
         elif atype == TYPE_MARKET_SELL and u1_int == manager_id:
-            user_events.append({"action": "SELL", "pid": pid, "amount": amt, "date": dt})
+            user_events.append({"action": "SELL", "pid": pid, "amount": amt, "date": dt, "raw_date": raw_dt})
         elif atype == TYPE_DIRECT_TRANSFER and u2_int == manager_id:
-            user_events.append({"action": "SELL", "pid": pid, "amount": amt, "date": dt})
+            user_events.append({"action": "SELL", "pid": pid, "amount": amt, "date": dt, "raw_date": raw_dt})
 
-    # Group by playerMasterId
+    # Sort all events chronologically
+    user_events.sort(key=lambda x: x.get("raw_date") or x["date"])
+
+    # Group by playerMasterId preserving chronological order
     player_events = defaultdict(list)
     for ev in user_events:
         player_events[ev["pid"]].append(ev)
@@ -106,37 +116,48 @@ def compute_manager_trading_history(
 
     for pid, evs in player_events.items():
         p_info = player_names.get(pid, {"name": f"Player #{pid}", "pos": "?", "market_value": 0})
-        buys = [e for e in evs if e["action"] == "BUY"]
-        sells = [e for e in evs if e["action"] == "SELL"]
+        open_buy_lots = []
 
-        while buys and sells:
-            b = buys.pop(0)
-            s = sells.pop(0)
-            diff = s["amount"] - b["amount"]
-            roi = (diff / b["amount"]) * 100 if b["amount"] else 0
+        for ev in evs:
+            if ev["action"] == "BUY":
+                open_buy_lots.append(ev)
+            elif ev["action"] == "SELL":
+                if open_buy_lots:
+                    # Match FIFO with the oldest active buy lot
+                    b = open_buy_lots.pop(0)
+                    diff = ev["amount"] - b["amount"]
+                    roi = (diff / b["amount"]) * 100 if b["amount"] else 0
+                    try:
+                        d_buy = datetime.strptime(b["date"], "%Y-%m-%d")
+                        d_sell = datetime.strptime(ev["date"], "%Y-%m-%d")
+                        days = (d_sell - d_buy).days
+                    except Exception:
+                        days = 0
 
-            try:
-                d_buy = datetime.strptime(b["date"], "%Y-%m-%d")
-                d_sell = datetime.strptime(s["date"], "%Y-%m-%d")
-                days = (d_sell - d_buy).days
-            except Exception:
-                days = 0
+                    completed_flips.append({
+                        "pid": pid,
+                        "name": p_info["name"],
+                        "pos": p_info["pos"],
+                        "buy_date": b["date"],
+                        "buy_price": b["amount"],
+                        "sell_date": ev["date"],
+                        "sell_price": ev["amount"],
+                        "profit": diff,
+                        "roi_pct": roi,
+                        "holding_days": max(0, days),
+                    })
+                else:
+                    # Sell with no preceding buy -> initial squad liquidation
+                    initial_sales.append({
+                        "pid": pid,
+                        "name": p_info["name"],
+                        "pos": p_info["pos"],
+                        "sell_date": ev["date"],
+                        "sell_price": ev["amount"],
+                    })
 
-            completed_flips.append({
-                "pid": pid,
-                "name": p_info["name"],
-                "pos": p_info["pos"],
-                "buy_date": b["date"],
-                "buy_price": b["amount"],
-                "sell_date": s["date"],
-                "sell_price": s["amount"],
-                "profit": diff,
-                "roi_pct": roi,
-                "holding_days": max(0, days),
-            })
-
-        # Remaining buys are open holdings (still in squad)
-        for b in buys:
+        # Remaining unmatched buys are current open holdings
+        for b in open_buy_lots:
             curr_mv = p_info.get("market_value") or 0
             diff = curr_mv - b["amount"]
             roi = (diff / b["amount"]) * 100 if b["amount"] else 0
@@ -156,16 +177,6 @@ def compute_manager_trading_history(
                 "unrealized_profit": diff,
                 "roi_pct": roi,
                 "holding_days": max(0, days),
-            })
-
-        # Remaining sells are sales of initial squad players
-        for s in sells:
-            initial_sales.append({
-                "pid": pid,
-                "name": p_info["name"],
-                "pos": p_info["pos"],
-                "sell_date": s["date"],
-                "sell_price": s["amount"],
             })
 
     completed_flips.sort(key=lambda x: x["sell_date"], reverse=True)

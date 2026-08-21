@@ -120,7 +120,7 @@ class TestRivalAccounting(unittest.TestCase):
         class MockClient:
             def league_teams(self, lid):
                 return teams
-            def league_activity(self, lid):
+            def league_activity(self, lid, fetch_all=True):
                 return activity
 
         rivals = analyze_rivals(MockClient(), "017906460", initial_budget=50_000_000)
