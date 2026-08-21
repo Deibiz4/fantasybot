@@ -116,6 +116,29 @@ class FantasyClient:
     def market(self, league_id):
         return self.get(self._cmp(f"/league/{league_id}/market?x-lang=es"))
 
+    def league_teams(self, league_id):
+        return self.get(self._cmp(f"/leagues/{league_id}/teams?x-lang=es"))
+
+    def league_activity(self, league_id, fetch_all=True):
+        if not fetch_all:
+            return self.get(self._cmp(f"/leagues/{league_id}/activity/0?x-lang=es"))
+        all_acts = []
+        idx = 0
+        while True:
+            try:
+                r = self.get(self._cmp(f"/leagues/{league_id}/activity/{idx}?x-lang=es"))
+                if not r:
+                    break
+                all_acts.extend(r)
+                idx += 1
+            except Exception:
+                break
+        return all_acts
+
+    def all_players(self):
+        """Fetches master list of all players in the competition with past season points and valuations."""
+        return self.get(self._cmp("/players?x-lang=es"))
+
     # --- writes: market ---
     def make_bid(self, league_id, market_id, money):
         return self.post(self._cmp(

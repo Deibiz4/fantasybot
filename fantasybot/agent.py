@@ -218,6 +218,12 @@ def review(client, days_to_matchday=None):
     _sync_tasks(gaps, targets, sells, lineup_changed)
     state.save_reminders(reminders)
 
+    try:
+        from .strategy import rivals as rivals_mod
+        rivals_list = rivals_mod.analyze_rivals(client, lid)
+    except Exception:
+        rivals_list = []
+
     return {
         "events": events,
         "money": team["teamMoney"],
@@ -228,6 +234,7 @@ def review(client, days_to_matchday=None):
         "needs": needs_report,
         "sells": sells,
         "clause_targets": targets,
+        "rivals": rivals_list,
         "reminders": reminders,
         "tasks": state.pending_tasks(),
     }

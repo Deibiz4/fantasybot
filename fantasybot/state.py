@@ -21,6 +21,18 @@ TASKS_PATH = os.path.join(STATE_DIR, "tasks.json")
 REMINDERS_PATH = os.path.join(STATE_DIR, "reminders.json")
 BIDS_PATH = os.path.join(STATE_DIR, "bids.json")
 BID_PLAN_PATH = os.path.join(STATE_DIR, "bid_plan.json")
+RIVALS_SNAPSHOT_PATH = os.path.join(STATE_DIR, "rivals_snapshot.json")
+ACTIVITY_HISTORY_PATH = os.path.join(STATE_DIR, "activity_history.json")
+SQUAD_HISTORY_PATH = os.path.join(STATE_DIR, "squad_history.json")
+PLAYERS_CACHE_PATH = os.path.join(STATE_DIR, "players_cache.json")
+
+
+def load_players_cache() -> dict:
+    return _read(PLAYERS_CACHE_PATH, {})
+
+
+def save_players_cache(cache: dict):
+    _write(PLAYERS_CACHE_PATH, cache)
 
 
 def load_bids() -> dict:
@@ -216,3 +228,105 @@ def mark_reminder_fired(key: str):
         if r["key"] == key:
             r["fired"] = True
     _write(REMINDERS_PATH, reminders)
+
+
+# --- rival snapshots & clause increases ---
+def snapshot_rivals(teams: list) -> dict:
+    """Takes a snapshot of all teams' player clauses: {manager_name: {player_id: {name, clause}}}."""
+    snap = {
+        "ts": int(time.time()),
+        "managers": {},
+    }
+    for t in teams or []:
+        mgr_name = (t.get("manager") or {}).get("managerName") or str(t.get("managerId") or "Unknown")
+        player_clauses = {}
+        for p in t.get("players") or []:
+            pm = p.get("playerMaster") or {}
+            pid = str(pm.get("id"))
+            pname = pm.get("nickname") or pm.get("name") or "Unknown"
+            clause = p.get("buyoutClause") or 0
+            player_clauses[pid] = {"name": pname, "clause": clause}
+        snap["managers"][mgr_name] = player_clauses
+    return snap
+
+
+def load_rivals_snapshot() -> dict:
+    return _read(RIVALS_SNAPSHOT_PATH, {})
+
+
+def save_rivals_snapshot(snap: dict):
+    _write(RIVALS_SNAPSHOT_PATH, snap)
+
+
+def diff_rival_clauses(prev: dict, curr: dict) -> list:
+    """Detects clause increases across managers between snapshots: [{manager, name, old_clause, new_clause, delta}]."""
+    if not prev or "managers" not in prev or not curr or "managers" not in curr:
+        return []
+    increases = []
+    prev_mgrs = prev.get("managers", {})
+    curr_mgrs = curr.get("managers", {})
+    for mgr, curr_players in curr_mgrs.items():
+        prev_players = prev_mgrs.get(mgr, {})
+        for pid, pdata in curr_players.items():
+            if pid in prev_players:
+                old_c = prev_players[pid].get("clause") or 0
+                new_c = pdata.get("clause") or 0
+                if new_c > old_c:
+                    increases.append({
+                        "manager": mgr,
+                        "player_id": pid,
+                        "name": pdata.get("name"),
+                        "old_clause": old_c,
+                        "new_clause": new_c,
+                        "delta": new_c - old_c,
+                    })
+    return increases
+
+
+# --- cumulative transaction & squad history ---
+def load_activity_history(league_id: str | None = None) -> list:
+    """Loads all accumulated transactions."""
+    raw = _read(ACTIVITY_HISTORY_PATH, {})
+    if league_id:
+        return raw.get(str(league_id), [])
+    # Return all if no league_id given
+    items = []
+    for lg_items in raw.values():
+        items.extend(lg_items)
+    return items
+
+
+def record_activity(new_items: list, league_id: str) -> list:
+    """Merges new activity items into persistent storage without duplicates.
+
+    Returns the complete chronological history for the league.
+    """
+    raw = _read(ACTIVITY_HISTORY_PATH, {})
+    lg_key = str(league_id)
+    known = {}
+    for item in raw.get(lg_key, []):
+        iid = str(item.get("id") or f"{item.get('activityTypeId')}_{item.get('user1Id')}_{item.get('amount')}_{item.get('createdAt')}")
+        known[iid] = item
+
+    for item in new_items or []:
+        iid = str(item.get("id") or f"{item.get('activityTypeId')}_{item.get('user1Id')}_{item.get('amount')}_{item.get('createdAt')}")
+        known[iid] = item
+
+    merged = sorted(known.values(), key=lambda x: str(x.get("createdAt") or x.get("id") or ""))
+    raw[lg_key] = merged
+    _write(ACTIVITY_HISTORY_PATH, raw)
+    return merged
+
+
+def load_squad_history(league_id: str) -> dict:
+    """Returns {manager_id: {player_id: {bought_price, first_seen, ...}}}."""
+    raw = _read(SQUAD_HISTORY_PATH, {})
+    return raw.get(str(league_id), {})
+
+
+def save_squad_history(history: dict, league_id: str):
+    raw = _read(SQUAD_HISTORY_PATH, {})
+    raw[str(league_id)] = history
+    _write(SQUAD_HISTORY_PATH, raw)
+
+

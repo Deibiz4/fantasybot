@@ -422,6 +422,187 @@ def cmd_tasks(args):
         print(f"  #{t['id']} {t['text']}{due}")
 
 
+def cmd_rivals(args):
+    """Analyze all rivals in the active league."""
+    from .strategy import rivals as rivals_mod
+    fc = FantasyClient()
+    lid, tid = fc.default_ids()
+    rep = rivals_mod.analyze_rivals(fc, lid, tid, initial_budget=args.initial_budget)
+
+    if args.json:
+        _print_json(rep)
+        return
+
+    # Check if querying specific manager
+    if args.manager:
+        query = args.manager.strip()
+        matched = None
+        for r in rep["rivals"]:
+            if query.lower() in (r.get("manager_name") or "").lower():
+                matched = r
+                break
+            if query.lower() in (r.get("team_name") or "").lower():
+                matched = r
+                break
+            if query in (str(r.get("manager_id")), str(r.get("team_id")), f"#{r.get('position')}", str(r.get('position'))):
+                matched = r
+                break
+            if query.lower() in ("me", "yo") and r.get("is_me"):
+                matched = r
+                break
+
+        if not matched:
+            print(f"No rival found matching '{args.manager}'.")
+            return
+
+        r = matched
+        is_me = " (YOU)" if r.get("is_me") else ""
+        print(f"\n--- RIVAL DETAILS: {r.get('manager_name')}{is_me} ---")
+        print(f"Team: {r.get('team_name')} | Rank: #{r.get('position')} | Points: {r.get('points')}")
+        print(f"Team Value: {r.get('team_value'):,} € | Estimated Balance: ~{r.get('estimated_balance'):,} €")
+        print(f"Total Clause Value: {r.get('total_clause_value'):,} € | Top Protected: {r.get('top_protected_player') or 'None'}")
+        print(f"Purchases: {r.get('purchases'):,} € | Sales: {r.get('sales'):,} € | Net Profit: {r.get('net_profit'):+,} €\n")
+
+        print("Squad Players:")
+        print(f"{'PLAYER':<20} {'POS':<12} {'BOUGHT AT':>13} {'CURRENT VALUE':>14} {'PROFIT / LOSS':>16} {'CLAUSE':>13} {'PROTECTION':>12}")
+        print("-" * 105)
+        for p in r.get("players", []):
+            b_str = f"{p['buy_price']:,} €" if p.get("buy_price") else "(Initial)"
+            diff_str = f"{p['profit_loss']:+,} € ({p['gain_pct']:+.1f}%)" if p.get("profit_loss") is not None else "-"
+            prot_str = f"+{p['protection']:,} €" if p.get("protection", 0) > 0 else "-"
+            print(f"{p['name'][:19]:<20} {p['pos']:<12} {b_str:>13} {p['market_value']:>12,} € {diff_str:>16} {p['clause']:>11,} € {prot_str:>12}")
+        print()
+        return
+
+    print(f"\n--- LEAGUE RIVALS FINANCIAL & CLAUSE AUDIT ({rep.get('league_name', 'League')}) ---")
+    print(f"Tracked {rep.get('events_count', 0)} transfer events from {rep.get('tracked_from')} to {rep.get('tracked_to')}.\n")
+    print(f"{'#':<3} {'MANAGER':<20} {'TEAM VALUE':>13} {'EST. CASH':>13} {'PURCHASES':>13} {'SALES':>13} {'NET P&L':>14} {'TOP CLAUSE / PROTECTED':<28}")
+    print("-" * 125)
+    for r in rep["rivals"]:
+        is_me = " (YOU)" if r.get("is_me") else ""
+        m_name = (r.get("manager_name") or "Unknown") + is_me
+        top_prot = r.get("top_protected_player") or "-"
+        print(f"{r.get('position', 0):<3} {m_name[:19]:<20} {r.get('team_value', 0):>11,} € ~{r.get('estimated_balance', 0):>11,} € {r.get('purchases', 0):>11,} € {r.get('sales', 0):>11,} € {r.get('net_profit', 0):>+12,} € {top_prot[:27]:<28}")
+
+    my_data = next((r for r in rep["rivals"] if r.get("is_me")), None)
+    if my_data:
+        print("\n* REALITY CHECK (Your Account):")
+        print(f"  Real Cash: {my_data.get('real_balance', 0):,} € | Pure Estimated: ~{my_data.get('estimated_balance', 0):,} € (Diff: {my_data.get('real_balance', 0) - my_data.get('estimated_balance', 0):+,} € from bonus payouts/unknown)\n")
+
+
+def cmd_history(args):
+    """Analyze speculation trading and flip ROI history."""
+    from .strategy import history as history_mod
+    fc = FantasyClient()
+    lid, tid = fc.default_ids()
+    rep = history_mod.analyze_league_trading_history(fc, lid, my_team_id=tid)
+
+    if args.json:
+        _print_json(rep)
+        return
+
+    # Check if querying specific manager
+    if args.manager:
+        query = args.manager.strip()
+        matched = None
+        for m in rep["managers"]:
+            if query.lower() in (m.get("manager_name") or "").lower():
+                matched = m
+                break
+            if query.lower() in (m.get("team_name") or "").lower():
+                matched = m
+                break
+            if query in (str(m.get("manager_id")), str(m.get("team_id")), f"#{m.get('position')}", str(m.get('position'))):
+                matched = m
+                break
+            if query.lower() in ("me", "yo") and m.get("is_me"):
+                matched = m
+                break
+
+        if not matched:
+            print(f"No manager found matching '{args.manager}'.")
+            return
+
+        m = matched
+        is_me = " (YOU)" if m.get("is_me") else ""
+        print(f"\n--- TRADING & FLIP HISTORY: {m.get('manager_name')}{is_me} ---")
+        print(f"Rank: #{m.get('position')} | Points: {m.get('points')} | Total P&L: {m.get('total_pnl'):+,} €")
+        print(f"Realized Flips Profit: {m.get('realized_profit'):+,} € ({m.get('completed_flips_count')} flips, {m.get('win_rate_pct'):.1f}% Win Rate, Avg ROI: {m.get('avg_roi_pct'):+.1f}%)")
+        print(f"Unrealized Profit in Squad: {m.get('unrealized_profit'):+,} € | Initial Squad Sales: {m.get('initial_sales_revenue'):,} €\n")
+
+        print("Closed Flips (Realized Profit):")
+        if m.get("completed_flips"):
+            print(f"{'PLAYER':<18} {'POS':<10} {'BOUGHT':>12} {'SOLD':>12} {'PROFIT':>14} {'ROI %':>8} {'DAYS':>6}")
+            print("-" * 85)
+            for f in m.get("completed_flips", []):
+                print(f"{f['name'][:17]:<18} {f['pos']:<10} {f['buy_price']:>10,} € {f['sell_price']:>10,} € {f['profit']:>+12,} € {f['roi_pct']:>+7.1f}% {f['holding_days']:>6}")
+        else:
+            print("  (No closed flips yet)")
+
+        print("\nOpen Purchased Holdings (Unrealized Profit):")
+        if m.get("open_holdings"):
+            print(f"{'PLAYER':<18} {'POS':<10} {'BOUGHT':>12} {'CURRENT':>12} {'UNREALIZED':>14} {'ROI %':>8}")
+            print("-" * 78)
+            for o in m.get("open_holdings", []):
+                print(f"{o['name'][:17]:<18} {o['pos']:<10} {o['buy_price']:>10,} € {o['market_value']:>10,} € {o['unrealized_profit']:>+12,} € {o['roi_pct']:>+7.1f}%")
+        else:
+            print("  (No open purchased holdings)")
+        print()
+        return
+
+    print(f"\n--- LEAGUE SPECULATION & FLIP PROFITABILITY LEADERBOARD ---")
+    print(f"Tracked {rep.get('tracked_events', 0)} transfer events from {rep.get('tracked_from')} to {rep.get('tracked_to')}.\n")
+    print(f"{'#':<3} {'MANAGER':<20} {'TOTAL P&L':>14} {'REALIZED':>13} {'UNREALIZED':>13} {'FLIPS':>7} {'WIN %':>8} {'AVG ROI':>9}")
+    print("-" * 95)
+    for m in rep["managers"]:
+        is_me = " (YOU)" if m.get("is_me") else ""
+        m_name = (m.get("manager_name") or "Unknown") + is_me
+        print(f"{m.get('position', 0):<3} {m_name[:19]:<20} {m.get('total_pnl', 0):>+12,} € {m.get('realized_profit', 0):>+11,} € {m.get('unrealized_profit', 0):>+11,} € {m.get('completed_flips_count', 0):>7} {m.get('win_rate_pct', 0):>7.1f}% {m.get('avg_roi_pct', 0):>+8.1f}%")
+    print()
+
+
+def cmd_scout(args):
+    """Scout a player or your entire squad."""
+    from .api import FantasyClient
+    from .strategy import scouting as scouting_mod
+    c = FantasyClient()
+
+    if getattr(args, "team", False) or not args.player:
+        lid, tid = c.default_ids()
+        team_data = c.team(lid, tid)
+        ts = scouting_mod.analyze_team_squad(team_data)
+        print(f"\n--- SQUAD SCOUTING AUDIT: {ts['team_name']} ---")
+        print(f"Squad: {ts['total_players']} players | Value: {ts['total_val']:,} € | Money: {ts['team_money']:,} €")
+        print(f"Past Season Total: {ts['total_last_pts']} pts (Avg: {ts['avg_last_pts']} pts/player)\n")
+
+        headers = {1: "GOALKEEPERS", 2: "DEFENDERS", 3: "MIDFIELDERS", 4: "FORWARDS"}
+        for pid in (1, 2, 3, 4):
+            plist = ts["by_pos"].get(pid, [])
+            if plist:
+                print(f"[{headers[pid]}]")
+                for r in plist:
+                    last_p = r['last_season_points']
+                    p_badge = f"{last_p} pts" if last_p > 0 else "New"
+                    prob_s = f"{r['starting_prob']}%" if r['starting_prob'] is not None else "?"
+                    print(f"  • {r['name']}: {p_badge} last yr | XI prob: {prob_s} | {r['physical_status']} | {r['verdict']}")
+                print()
+        return
+
+    all_p = c.all_players() or []
+    pm = scouting_mod.search_player_in_list(args.player, all_p)
+    if not pm:
+        print(f"No player found matching '{args.player}'.")
+        return
+    s = scouting_mod.analyze_player_profile(pm)
+    print(f"\n--- SCOUTING REPORT: {s['name']} ({s['pos']}) ---")
+    print(f"Team: {s['team']} | Value: {s['market_value']:,} €")
+    print(f"Past Season: {s['last_season_points']} pts (~{s['last_season_avg']} pts/gw) | {s['tier_badge']}")
+    print(f"Current: {s['current_points']} pts ({s['current_avg']:.1f} pts/gw) | {s['evolution']}")
+    print(f"Lineup Role: {s['starter_status']} ({s['role_shift']})")
+    print(f"Fitness & Availability: {s['physical_status']}")
+    print(f"Verdict: {s['verdict']}\n")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="fantasybot", description="LALIGA Fantasy agent")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -464,6 +645,22 @@ def build_parser():
     ag.add_argument("--json", action="store_true",
                     help="JSON output of the report (for Hermes)")
     ag.set_defaults(func=cmd_agent)
+
+    rv = sub.add_parser("rivals", help="analyze rival balances, clauses and acquisitions")
+    rv.add_argument("manager", nargs="?", default=None, help="manager name, team name, rank (#1), or 'me'")
+    rv.add_argument("--initial-budget", type=int, default=None, help="override initial starting budget (default: 50,000,000)")
+    rv.add_argument("--json", action="store_true", help="JSON output")
+    rv.set_defaults(func=cmd_rivals)
+
+    hi = sub.add_parser("history", help="analyze speculation trading and flip ROI history")
+    hi.add_argument("manager", nargs="?", default=None, help="manager name, team name, rank (#1), or 'me'")
+    hi.add_argument("--json", action="store_true", help="JSON output")
+    hi.set_defaults(func=cmd_history)
+
+    sc = sub.add_parser("scout", help="multi-season scouting report for a player or squad")
+    sc.add_argument("player", nargs="?", default=None, help="player name, nickname or ID")
+    sc.add_argument("--team", action="store_true", help="scout your entire squad")
+    sc.set_defaults(func=cmd_scout)
 
     wt = sub.add_parser("watch", help="live monitoring UI (mission control)")
     wt.add_argument("--run", action="store_true",
@@ -522,6 +719,11 @@ def build_parser():
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     args = build_parser().parse_args(argv)
     try:
         args.func(args)

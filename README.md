@@ -1,46 +1,18 @@
-# fantasybot
+# fantasybot ⚽🤖
 
-An agent for **LALIGA Fantasy**: it connects to the game's (unofficial) API and to
-external sources (futbolfantasy.com) to read your squad, the market and value
-trends, and to operate (bid, sell, buyout clauses, set your lineup).
+Autonomous agent for **LALIGA Fantasy**: reads the game, decides and acts
+(lineup, bids, sales, buyout clauses, rival finances, trade history and multi-season player scouting).
 
-## Getting started
-
-Login (Google account, 2-step OAuth flow):
+Written in standard Python (no extra dependencies for the core agent).
 
 ```bash
-# Step 1: generate the login URL
-python -m fantasybot login
-# Log in with Google in the browser. In DevTools > Network (Preserve log),
-# copy the 'authredirect://...' URL from the request that shows "(canceled)".
-
-# Step 2: exchange the code for tokens
-python -m fantasybot login "authredirect://com.lfp.laligafantasy?code=..."
-```
-
-The token lasts 24h and refreshes itself. If you ever need to do it by hand:
-`python -m fantasybot refresh`. The `refresh_token` lasts 90 days; when it expires,
-log in again.
-
-## Commands
-
-```bash
-python -m fantasybot me           # your user
-python -m fantasybot leagues      # your leagues
-python -m fantasybot team         # your squad
-python -m fantasybot market       # your league's market
-python -m fantasybot lineup       # your lineup
-python -m fantasybot trends       # who's rising/falling in value (futbolfantasy)
-python -m fantasybot onces real-madrid   # a team's likely starting XI
-python -m fantasybot flip [--horizon N]  # resale opportunities
-python -m fantasybot optimize [--apply]  # best lineup (apply with --apply)
-python -m fantasybot needs [--days N]    # squad gaps and signings
-python -m fantasybot sell <playerId> <price>     # list a player for sale
-python -m fantasybot bid <marketId> <amount>     # bid on a market player
-python -m fantasybot cancel-bid <marketId> <bidId>
-python -m fantasybot clause <playerId> <amount>  # pay a buyout clause
-python -m fantasybot bid-plan <marketId> <max>   # schedule a last-minute bid
-python -m fantasybot bid-run                      # run the bid plan (fired by the cron)
+python -m fantasybot login                        # official OAuth (PKCE)
+python -m fantasybot agent                        # review + decision plan
+python -m fantasybot agent --execute              # acts: sets lineup + bids
+python -m fantasybot rivals                       # rivals financial & clause audit
+python -m fantasybot history                      # speculation trading & flip ROI leaderboard
+python -m fantasybot scout <player>               # multi-season scouting report (points, tiers, starter)
+python -m fantasybot scout --team                 # full squad scouting audit
 python -m fantasybot watch [--run|--hermes]       # live monitoring UI
 ```
 
@@ -66,7 +38,15 @@ agent schedules its flips into a "plan" (`bid-plan`) and a cron bids right at th
 close: if there's no competition, the value plus a touch; if there is, up to your
 max. Deterministic and free of tokens.
 
-The decision commands (`agent`, `flip`, `needs`, `optimize`) accept `--json` for
+**Rival tracking & Trade History:**
+- `rivals [manager|rank]`: estimates rivals' liquid balances, trading flow, clause investments, and acquisition performance.
+- `history [manager|rank]`: analyzes speculation profitability, completed flips with ROI % and holding duration, open portfolio holdings, and initial squad liquidations.
+
+**Multi-Season Player Scouting:**
+- `scout <player>`: analyzes multi-season points history (`lastSeasonPoints`), historical tier (🌟 *Top Star*, 🛡️ *Fixed Starter*, 🔄 *Rotation*), scoring pace evolution vs last year, FutbolFantasy starting probability (0-95%), role shifts (e.g. was starter last year -> benched now), fitness & availability, and value-for-money (€/pt) ratio.
+- `scout --team`: runs a full squad audit reviewing past season output, squad stars, fitness risk, and line-by-line recommendations.
+
+The decision commands (`agent`, `flip`, `needs`, `optimize`, `rivals`, `history`, `scout`) accept `--json` for
 programmatic consumption (that's how the autonomous agent reads them).
 
 ## Autonomous agent (Hermes)
@@ -141,7 +121,7 @@ fantasybot/
   net.py / cache.py    HTTP with backoff (429) + on-disk cache of scrapes
   matching.py          name normalization and cross-source matching
   sources/             external data: market_trends, lineups, matchday (futbolfantasy)
-  strategy/            decisions: flip, lineup (optimizer), needs, sell
+  strategy/            decisions: flip, lineup (optimizer), needs, sell, rivals, history, scouting
   state.py             snapshot + tasks + reminders + bid plan (.state/)
   events.py            native action trace (for the monitoring UI)
   agent.py             the "brain": review() = a human-like cycle
